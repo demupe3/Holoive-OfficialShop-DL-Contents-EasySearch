@@ -6,7 +6,7 @@
 | スクリプト名                              | 対応環境                         | 主な機能                                                                 |
 |------------------------------------------|----------------------------------|--------------------------------------------------------------------------|
 | **PC（高機能フル版）**<br>`hololive-shop-dl-tool.user.js` | Tampermonkey     | ・購入履歴キャッシュ＋高速検索<br>・形式選択一括ダウンロード（wav/mp3/zip/pdf/画像）<br>・ダウンロード済みスキップ機能<br>・2秒間隔安定DL |
-| **iPhone・iPad版（軽量検索特化）**<br>`hololive-shop-ios-search.user.js` | Userscriptsアプリ（無料）        | ・iOS Safariで完全動作<br>・全ページ自動取得＆ローカル保存<br>・タレント名＋フリーワード検索<br>・新着順／古い順ソート<br>・キーワード自由追加 |
+| **スマホ版（軽量検索特化）**<br>`hololive-shop-smartphone-search.user.js` | Userscriptsアプリ（無料）        | ・iOS SafariまたはFirefox for Androidで完全動作<br>・全ページ自動取得＆ローカル保存<br>・タレント名＋フリーワード検索<br>・新着順／古い順ソート<br>・キーワード自由追加 |
 
 どっちも**自分が買った商品だけ**を快適に整理・保存するためのファン製ツールです
 
@@ -20,9 +20,13 @@
 
 ### iPhone・iPadの方（Safariで使いたい人）
 1. App Storeで無料アプリ「[Userscripts](https://apps.apple.com/jp/app/userscripts/id1463298887)」をインストール  
-2. Userscriptsを開いて「＋」→ このリポジトリの `hololive-shop-ios-search.user.js` を保存  
+2. Userscriptsを開いて「＋」→ このリポジトリの `hololive-shop-smartphone-search.user.js` を保存  
 3. Userscriptsの設定で「常に許可」に設定  
 4. Safariで公式ショップのダウンロード一覧ページを開くと、右下に丸いボタン出現！
+
+### Androidの方（Firefox for AndroidでTampermonkeyを使う）
+1. Firefoxの拡張機能からTampermonkeyをインストール
+2. [greasyfork](https://greasyfork.org/ja/scripts/558019-%E3%83%9B%E3%83%AD%E3%83%A9%E3%82%A4%E3%83%96%E5%85%AC%E5%BC%8F%E3%82%B7%E3%83%A7%E3%83%83%E3%83%97%E6%A4%9C%E7%B4%A2)からインストール
 
 ## 機能詳細
 

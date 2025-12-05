@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         ホロライブ公式ショップ検索 (iOS版 v2.1)
+// @name         ホロライブ公式ショップ検索
 // @namespace    http://ios.userscript/
 // @version      1.1
 // @description  iPhone用：購入済み商品の検索・ソート・設定機能付き（メンバーリスト修正版）
