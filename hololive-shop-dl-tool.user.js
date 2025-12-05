@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ホロライブ公式ショップ：DL商品検索＆一括DLツール
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  購入済み商品の検索（設定・ソート機能）と、詳細ページでの高機能一括ダウンロード（形式指定・履歴管理）
 // @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads/*
@@ -82,10 +82,11 @@
     return saved ? JSON.parse(saved) : [];
   }
   function addHistory(filename) {
+    const safeName = filename.replace(/[\/\\]/g, '／');
     const hist = getHistory();
-    if (!hist.includes(filename)) {
-      hist.push(filename);
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(hist));
+    if (!hist.includes(safeName)) {
+        hist.push(safeName);
+        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(hist));
     }
   }
 

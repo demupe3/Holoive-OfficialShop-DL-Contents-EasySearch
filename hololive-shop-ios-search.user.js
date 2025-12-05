@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ホロライブ公式ショップ検索 (iOS版 v2.1)
 // @namespace    http://ios.userscript/
-// @version      1.0
+// @version      1.1
 // @description  iPhone用：購入済み商品の検索・ソート・設定機能付き（メンバーリスト修正版）
 // @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads/*
@@ -166,7 +166,13 @@
         const nextUrl = nextLinkEl.href;
         await new Promise((r) => setTimeout(r, SCAN_INTERVAL));
         try {
-          const response = await fetch(nextUrl);
+          const response = await fetch(nextUrl, {
+            credentials: "include",
+            headers: {
+              Accept: "text/html",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+          });
           const text = await response.text();
           const parser = new DOMParser();
           currentDoc = parser.parseFromString(text, "text/html");
@@ -249,6 +255,11 @@
         saveKeywords(currentKeywords);
         modal.remove();
         if (onClose) onClose();
+        setTimeout(() => {
+          document
+            .querySelector("#sp-search-select")
+            ?.dispatchEvent(new Event("change"));
+        }, 100);
       };
 
       modal.querySelector("#sp-add-kw").onclick = () => {
