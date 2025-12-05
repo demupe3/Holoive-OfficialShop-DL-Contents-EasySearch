@@ -6,6 +6,7 @@
 // @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads/*
 // @grant        none
+// @license MIT
 // ==/UserScript==
 
 (function () {
