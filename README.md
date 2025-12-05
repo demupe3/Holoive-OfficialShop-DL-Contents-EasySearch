@@ -14,7 +14,7 @@
 
 ### PCの方（一括ダウンロードもしたい人）→ こっち推奨！
 1. [Tampermonkey](https://www.tampermonkey.net/) をインストール  
-2. 新規スクリプトにコピペ！
+2. このレポジトリのスクリプトのRAWを押してTampermonkeyに取り込むか[greasyfork](https://greasyfork.org/ja/scripts/558012-%E3%83%9B%E3%83%AD%E3%83%A9%E3%82%A4%E3%83%96%E5%85%AC%E5%BC%8F%E3%82%B7%E3%83%A7%E3%83%83%E3%83%97-dl%E5%95%86%E5%93%81%E6%A4%9C%E7%B4%A2-%E4%B8%80%E6%8B%ACdl%E3%83%84%E3%83%BC%E3%83%AB)からインストール！
 
 → インストール後、公式ショップのダウンロード一覧ページに行くと右下にボタン出現！
 
