@@ -1,0 +1,2 @@
+# Holoive-OfficialShop-DL-Contents-EasySearch
+ホロライブ公式ショップの購入済みボイス・ASMR・壁紙などをキーワード検索＋形式選択で一括ダウンロードできるユーザースクリプト
