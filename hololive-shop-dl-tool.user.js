@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         ホロライブ公式ショップ：高速検索＋一括DLツール（完全最適化版）
+// @name         ホロライブ公式ショップ：高速検索＋一括DLツール（URL修正版）
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.2
 // @description  超高速データ取得・検索・ソート＋詳細ページで形式選択一括ダウンロード（履歴管理付き）
-// @author       demupe3 (fully optimized by assistant)
+// @author       demupe3 (URL fixed by assistant)
 // @match        https://shop.hololivepro.com/apps/downloads*
 // @grant        GM_download
 // @license      MIT
@@ -117,37 +117,88 @@
     }
   }
 
-  // ==================== 超高速クローリング ====================
+  // ==================== 修正版クローリング（line_items_page対応） ====================
   async function startCrawling() {
     const container = document.getElementById("sp-tool-container");
     const statusEl = container.querySelector("div:last-child");
     container.style.opacity = "0.6";
     statusEl.textContent = "読み込み中";
 
-    const allItems = [];
-    let page = 1;
+    // 初回ページから注文IDと顧客IDを抽出
+    const currentUrl = window.location.href;
+    const urlMatch = currentUrl.match(/\/orders\/(\d+)(?:\?logged_in_customer_id=(\d+))?/);
+    if (!urlMatch) {
+      alert("ページ構造が認識できません。URLを確認してください。");
+      container.style.opacity = "1";
+      return;
+    }
+    const orderId = urlMatch[1];
+    const customerId = urlMatch[2] || orderId; // 顧客IDがorderIdと同じ場合を考慮
+    const baseUrl = `https://shop.hololivepro.com/apps/downloads/orders/${orderId}?logged_in_customer_id=${customerId}`;
 
-    while (true) {
+    let allItems = [];
+    let page = 1;
+    let hasNext = true;
+
+    while (hasNext) {
+      const pageUrl = `${baseUrl}&line_items_page=${page}`;
       statusEl.textContent = `P.${page}`;
-      const url = `https://shop.hololivepro.com/apps/downloads/?page=${page}`;
+      console.log(`Fetching: ${pageUrl}`); // デバッグ用
 
       let html;
       try {
-        const res = await fetch(url, { credentials: "include" });
-        if (!res.ok) break;
+        const res = await fetch(pageUrl, {
+          credentials: "include",
+          headers: {
+            Accept: "text/html",
+            "X-Requested-With": "XMLHttpRequest"
+          }
+        });
+        if (!res.ok) {
+          console.error(`HTTP ${res.status} for page ${page}`);
+          break;
+        }
         html = await res.text();
       } catch (e) {
-        console.error("Fetch failed:", e);
+        console.error("Fetch error:", e);
         break;
       }
 
       const doc = new DOMParser().parseFromString(html, "text/html");
       const items = extractItems(doc);
-      if (items.length === 0) break;
+      console.log(`Page ${page}: ${items.length} items extracted`); // デバッグ用
 
-      allItems.push(...items);
-      page++;
-      await new Promise(r => setTimeout(r, 300));
+      if (items.length === 0) {
+        // 次リンクを確認して最終判定
+        const nextLinkEl = doc.querySelector(".sky-pilot-pagination .next a");
+        if (!nextLinkEl) {
+          hasNext = false;
+        } else {
+          // 次リンクをfetchしてフォールバック
+          const nextUrl = nextLinkEl.href;
+          await new Promise(r => setTimeout(r, 500));
+          const nextRes = await fetch(nextUrl, { credentials: "include" });
+          if (!nextRes.ok) break;
+          const nextHtml = await nextRes.text();
+          const nextDoc = new DOMParser().parseFromString(nextHtml, "text/html");
+          const nextItems = extractItems(nextDoc);
+          if (nextItems.length === 0) break;
+          allItems.push(...nextItems);
+          hasNext = false; // フォールバック後終了
+        }
+      } else {
+        allItems.push(...items);
+        page++;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
+    console.log(`Crawling completed: Total ${allItems.length} items`); // デバッグ用
+    if (allItems.length === 0) {
+      alert("商品が検出されませんでした。ログイン状態やページ構造を確認の上、再試行してください。");
+      container.style.opacity = "1";
+      statusEl.textContent = "エラー";
+      return;
     }
 
     saveItems(allItems);
@@ -381,7 +432,7 @@
     document.body.appendChild(modal);
   }
 
-  // ==================== 検索モーダル（完全版）===================
+  // ==================== 検索モーダル ====================
   function showSearchModal(items) {
     if (document.getElementById("sp-results-modal")) return;
 
