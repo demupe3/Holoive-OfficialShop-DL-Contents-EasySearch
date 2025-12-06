@@ -71,8 +71,8 @@
 
     const hasData = !!loadItems();
     container.innerHTML = `
-      <div id="sp-main-btn" style="font-size:28px;">${hasData ? "検索" : "取得"}</div>
-      <div id="sp-status" style="font-size:9px; margin-top:2px;">${hasData ? "検索" : "取得"}</div>
+      <div id="sp-main-btn" style="font-size:28px;">${hasData ? '🔍' : '📥'}</div>
+      <div id="sp-status" style="font-size:9px; margin-top:2px;">${hasData ? '検索' : '取得'}</div>
     `;
 
     container.onclick = () => {
@@ -92,25 +92,25 @@
     status.textContent = "読込中";
 
     // 現在のURLからorderIdとcustomerIdを抽出
-    const urlMatch = location.href.match(/\/orders\/(\d+)[^?]*\?logged_in_customer_id=(\d+)/);
+    const urlMatch = location.href.match(/\/orders\/(\d+)(?:\?logged_in_customer_id=(\d+))?/);
     if (!urlMatch) {
       alert("ページ構造が変更された可能性があります。ログイン状態を確認してください。");
       container.style.opacity = "1";
       return;
     }
-    const [, orderId, customerId] = urlMatch;
+    const orderId = urlMatch[1];
+    const customerId = urlMatch[2] || orderId;
     const baseUrl = `https://shop.hololivepro.com/apps/downloads/orders/${orderId}?logged_in_customer_id=${customerId}`;
 
     let allItems = [];
     let page = 1;
 
     while (true) {
-      const url = `${baseUrl}&line_items_page=${page}`;
       status.textContent = `P.${page}`;
 
       let html;
       try {
-        const res = await fetch(url, { credentials: "include" });
+        const res = await fetch(`${baseUrl}&line_items_page=${page}`, { credentials: "include" });
         if (!res.ok) break;
         html = await res.text();
       } catch (e) {
@@ -129,7 +129,7 @@
     }
 
     saveItems(allItems);
-    document.getElementById("sp-main-btn").textContent = "検索";
+    document.getElementById("sp-main-btn").textContent = "🔍";
     status.textContent = "検索";
     container.style.opacity = "1";
 
@@ -163,48 +163,46 @@
   }
 
   // 設定モーダル
-  function openSettingsModal(onClose) {
+  function openKeywordSettings(onClose) {
     const modal = document.createElement("div");
     modal.style.cssText = `
-      position:fixed; top:0; left:0; width:100%; height:100%;
-      background:#f2f2f7; z-index:100001; font-family:-apple-system,sans-serif;
-      display:flex; flex-direction:column;
+      position:fixed; inset:0; background:#f2f2f7; z-index:100003; display:flex; flex-direction:column; font-family:-apple-system,sans-serif;
     `;
 
     let keywords = loadKeywords();
 
     const render = () => {
       modal.innerHTML = `
-        <div style="padding:15px 15px 10px; background:#fff; border-bottom:1px solid #c6c6c8; padding-top:50px; display:flex; justify-content:space-between; align-items:center;">
+        <div style="padding:15px 15px 10px; background:white; border-bottom:1px solid #c6c6c8; padding-top:50px; display:flex; justify-content:space-between; align-items:center;">
           <h2 style="margin:0; font-size:17px; font-weight:600;">キーワード設定</h2>
-          <button id="done-btn" style="font-size:17px; color:#007aff; background:none; border:none; font-weight:600;">完了</button>
+          <button id="done" style="font-size:17px; color:#007aff; background:none; border:none; font-weight:600;">完了</button>
         </div>
-        <div style="padding:15px; background:#fff;">
+        <div style="padding:15px; background:white;">
           <div style="display:flex; gap:10px;">
             <input id="new-kw" type="text" placeholder="新しいキーワード" style="flex:1; padding:10px; border:1px solid #ccc; border-radius:8px; font-size:16px;">
-            <button id="add-btn" style="padding:0 16px; background:#007aff; color:#fff; border:none; border-radius:8px; font-weight:600;">追加</button>
+            <button id="add" style="padding:0 16px; background:#007aff; color:white; border:none; border-radius:8px; font-weight:600;">追加</button>
           </div>
         </div>
         <div style="flex:1; overflow-y:auto; padding:15px 15px 80px; -webkit-overflow-scrolling:touch;">
-          <div id="kw-list" style="background:#fff; border-radius:10px; overflow:hidden;"></div>
+          <div id="list" style="background:white; border-radius:10px; overflow:hidden;"></div>
         </div>
-        <div style="padding:20px; text-align:center;">
-          <button id="reset-btn" style="color:#ff3b30; background:none; border:none;">初期設定に戻す</button>
+        <div style="padding:20px; text-align:center; background:white; border-top:1px solid #ddd;">
+          <button id="reset" style="color:#ff3b30; background:none; border:none; font-size:15px;">初期設定に戻す</button>
         </div>
       `;
 
-      const list = modal.querySelector("#kw-list");
+      const list = modal.querySelector("#list");
       list.innerHTML = "";
       const frag = document.createDocumentFragment();
 
       keywords.slice(1).forEach((kw, i) => {
         const div = document.createElement("div");
-        div.style.cssText = "display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid #e5e5ea;";
+        div.style.cssText = "display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #e5e5ea;";
         div.innerHTML = `
           <span style="font-size:16px;">${kw}</span>
-          <button data-idx="${i + 1}" style="width:30px; height:30px; background:#ff3b30; color:#fff; border:none; border-radius:50%; font-size:14px;">−</button>
+          <button data-idx="${i + 1}" style="width:32px; height:32px; background:#ff3b30; color:white; border:none; border-radius:50%; font-size:14px;">−</button>
         `;
-        div.querySelector("button").onclick = (e) => {
+        div.querySelector("button").onclick = e => {
           e.stopPropagation();
           keywords.splice(parseInt(e.target.dataset.idx), 1);
           render();
@@ -213,23 +211,22 @@
       });
       list.appendChild(frag);
 
-      modal.querySelector("#done-btn").onclick = () => {
+      modal.querySelector("#done").onclick = () => {
         saveKeywords(keywords);
         modal.remove();
         onClose?.();
       };
 
-      modal.querySelector("#add-btn").onclick = () => {
-        const input = modal.querySelector("#new-kw");
-        const val = input.value.trim();
+      modal.querySelector("#add").onclick = () => {
+        const val = modal.querySelector("#new-kw").value.trim();
         if (val && !keywords.includes(val)) {
           keywords.push(val);
-          input.value = "";
+          modal.querySelector("#new-kw").value = "";
           render();
         }
       };
 
-      modal.querySelector("#reset-btn").onclick = () => {
+      modal.querySelector("#reset").onclick = () => {
         if (confirm("キーワードを初期状態に戻しますか？")) {
           keywords = [...DEFAULT_KEYWORDS];
           render();
@@ -255,7 +252,7 @@
     `;
 
     const header = document.createElement("div");
-    header.style.cssText = "background:#f8f9fa; border-bottom:1px solid #ddd; padding:15px 15px 10px; padding-top:50px;";
+    header.style.cssText = "background:#f8f9fa; border-bottom:1px solid #ddd; padding:15px; padding-top:50px;";
 
     const listContainer = document.createElement("div");
     listContainer.style.cssText = "flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;";
@@ -273,16 +270,16 @@
         <div style="display:flex; gap:8px; margin-bottom:8px;">
           <div style="flex:1; position:relative;">
             <select id="select-kw" style="width:100%; padding:10px; font-size:16px; border:1px solid #ccc; border-radius:8px; background:#fff; appearance:none;">${options}</select>
-            <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); pointer-events:none; color:#888;">Down Arrow</span>
+            <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); pointer-events:none; color:#888;">▼</span>
           </div>
-          <button id="config-btn" style="width:44px; height:44px; border:1px solid #ccc; background:#fff; border-radius:8px; font-size:20px;">Settings</button>
+          <button id="config-btn" style="width:44px; height:44px; border:1px solid #ccc; background:#fff; border-radius:8px; font-size:20px;">⚙️</button>
         </div>
         <div style="display:flex; gap:8px;">
           <input id="text-search" type="text" placeholder="追加キーワード (例: 2024)" style="flex:1; padding:10px; font-size:16px; border:2px solid #2ccce4; border-radius:8px;">
           <button id="sort-btn" style="padding:0 14px; border:2px solid #2ccce4; background:#fff; color:#2ccce4; border-radius:8px; font-weight:bold;">新着順</button>
         </div>
         <div style="text-align:right; margin-top:8px;">
-          <button id="refresh-btn" style="font-size:13px; color:#2ccce4; background:none; border:none;">データを再取得</button>
+          <button id="refresh-btn" style="font-size:13px; color:#2ccce4; background:none; border:none;">🔄 データ更新</button>
         </div>
       `;
 
@@ -304,7 +301,7 @@
         }
       };
       header.querySelector("#config-btn").onclick = () => {
-        openSettingsModal(() => {
+        openKeywordSettings(() => {
           renderHeader();  // キーワード更新後に再描画（イベントは維持）
           renderList();
         });
@@ -341,7 +338,7 @@
           </div>
           <div style="flex:1;">
             <div style="font-weight:600; font-size:14px; line-height:1.4; margin-bottom:4px; color:#333;">${item.title}</div>
-            <div style="font-size:12px; color:#2ccce4;">開く Right Arrow</div>
+            <div style="font-size:12px; color:#2ccce4;">開く →</div>
           </div>
         `;
         frag.appendChild(a);
