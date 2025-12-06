@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         ホロライブ公式ショップ：高速検索＋一括DLツール（URL修正版）
+// @name         ホロライブ公式ショップ：ライブラリ内検索＋一括DL
 // @namespace    http://tampermonkey.net/
-// @version      2.2
-// @description  超高速データ取得・検索・ソート＋詳細ページで形式選択一括ダウンロード（履歴管理付き）
-// @author       demupe3 (URL fixed by assistant)
+// @version      2.0
+// @description  ライブラリ内ポップアップ検索・キーワード完全対応・壁紙手動推奨
+// @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads*
 // @grant        GM_download
 // @license      MIT
@@ -32,7 +32,6 @@
   let cachedItems = null;
   let cachedKeywords = null;
 
-  // ==================== ストレージ ====================
   function loadKeywords() {
     if (cachedKeywords) return cachedKeywords;
     const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
@@ -71,50 +70,159 @@
     }
   }
 
-  // ==================== フローティングボタン ====================
+  // フローティングボタン（右下）
   function createFloatingButton() {
     if (document.getElementById("sp-tool-container")) return;
 
     const isDetailPage = !!document.querySelector(".skypilot-track-container");
     const hasData = !!loadItems();
 
-    const container = document.createElement("div");
-    container.id = "sp-tool-container";
-    container.style.cssText = `
+    const btn = document.createElement("div");
+    btn.id = "sp-tool-container";
+    btn.style.cssText = `
       position:fixed; bottom:20px; right:20px; z-index:99999;
       width:70px; height:70px; border-radius:50%;
       background:${isDetailPage ? '#e42c64' : '#2ccce4'};
       box-shadow:0 6px 20px rgba(0,0,0,0.3);
       display:flex; flex-direction:column; justify-content:center; align-items:center;
       color:white; font-family:-apple-system,sans-serif; cursor:pointer;
-      user-select:none; transition:all 0.3s; -webkit-tap-highlight-color:transparent;
+      user-select:none; transition:all 0.3s;
     `;
-
-    container.innerHTML = `
+    btn.innerHTML = `
       <div style="font-size:34px;">${isDetailPage ? '⬇️' : (hasData ? '🔍' : '📥')}</div>
       <div style="font-size:10px; margin-top:2px;">${isDetailPage ? '一括DL' : (hasData ? '検索' : '取得')}</div>
     `;
 
-    container.onclick = () => {
-      if (isDetailPage) {
-        openBulkDownloadModal();
-      } else if (hasData) {
-        showSearchModal(loadItems());
-      } else if (confirm("購入データをすべて読み込みますか？\n（通常1〜2分で完了します）")) {
-        startCrawling();
-      }
+    btn.onclick = () => {
+      if (isDetailPage) openBulkDownloadModal();
+      else if (hasData) showSearchModalInLibrary(loadItems());
+      else if (confirm("購入データをすべて読み込みますか？\n（通常1〜2分で完了）")) startCrawling();
     };
 
-    document.body.appendChild(container);
+    document.body.appendChild(btn);
+  }
 
-    // プレイヤー表示時に自動非表示
-    const player = document.querySelector(".skypilot-player-container");
-    if (player) {
-      const observer = new MutationObserver(() => {
-        container.style.display = player.classList.contains("hidden") ? "flex" : "none";
+  // ライブラリ内ポップアップ検索モーダル（完璧版）
+  function showSearchModalInLibrary(items) {
+    const existing = document.getElementById("sp-results-modal");
+    if (existing) existing.remove();
+
+    const libraryContainer = document.querySelector(".sky-pilot-files-list");
+    if (!libraryContainer) return;
+
+    let sortDescending = true;
+
+    const modal = document.createElement("div");
+    modal.id = "sp-results-modal";
+    modal.style.cssText = `
+      margin:20px 0; background:white; border-radius:16px;
+      box-shadow:0 8px 32px rgba(0,0,0,0.2); overflow:hidden;
+      font-family:-apple-system,sans-serif; position:relative; z-index:100;
+    `;
+
+    const header = document.createElement("div");
+    header.style.cssText = "background:#f8f9fa; padding:16px; border-bottom:1px solid #ddd; position:relative;";
+
+    const listContainer = document.createElement("div");
+    listContainer.style.cssText = "max-height:70vh; overflow-y:auto; padding:0 16px; -webkit-overflow-scrolling:touch;";
+
+    // ヘッダー再描画関数（イベント再登録を防ぐため分離）
+    const renderHeader = () => {
+      const keywords = loadKeywords();
+      const valid = keywords.filter(k => k === "指定なし" || items.some(i => i.title.toLowerCase().includes(k.toLowerCase())));
+      const options = valid.map(k => `<option value="${k}">${k}</option>`).join("");
+
+      header.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:17px; font-weight:600;">商品検索 (${items.length}件)</h3>
+          <button id="sp-close" style="background:none; border:none; font-size:24px; cursor:pointer; color:#666;">×</button>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:180px; position:relative;">
+            <select id="sp-select" style="width:100%; padding:11px; font-size:16px; border:1px solid #ccc; border-radius:8px; background:white; appearance:none;">
+              ${options}
+            </select>
+            <span style="position:absolute; right:12px; top:50%; transform:translateY(-50%); pointer-events:none; color:#888;">▼</span>
+          </div>
+          <button id="sp-config" style="width:48px; height:48px; background:white; border:1px solid #ccc; border-radius:8px; font-size:22px;">⚙️</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <input id="sp-text" type="text" placeholder="追加キーワード（例: 2024）" style="flex:1; padding:11px; font-size:16px; border:2px solid #2ccce4; border-radius:8px;">
+          <button id="sp-sort" style="padding:0 16px; background:white; border:2px solid #2ccce4; color:#2ccce4; border-radius:8px; font-weight:bold; white-space:nowrap;">新着順</button>
+          <button id="sp-refresh" style="padding:0 16px; background:#2ccce4; color:white; border:none; border-radius:8px; font-weight:bold;">更新</button>
+        </div>
+      `;
+
+      // イベントリスナは一度だけ登録（再描画されても上書きされない）
+      header.querySelector("#sp-close").onclick = () => modal.remove();
+      header.querySelector("#sp-text").addEventListener("input", renderList);
+      header.querySelector("#sp-select").addEventListener("change", renderList);
+      header.querySelector("#sp-sort").onclick = () => {
+        sortDescending = !sortDescending;
+        header.querySelector("#sp-sort").textContent = sortDescending ? "新着順" : "古い順";
+        renderList();
+      };
+      header.querySelector("#sp-refresh").onclick = () => {
+        if (confirm("最新データを再取得しますか？")) {
+          modal.remove();
+          localStorage.removeItem(STORAGE_KEY_DATA);
+          cachedItems = null;
+          startCrawling();
+        }
+      };
+      header.querySelector("#sp-config").onclick = () => {
+        openKeywordSettings(() => {
+          renderHeader();  // キーワード更新後に再描画（イベントは維持される）
+          renderList();
+        });
+      };
+    };
+
+    const renderList = () => {
+      const selectVal = header.querySelector("#sp-select")?.value || "指定なし";
+      const inputVal = header.querySelector("#sp-text")?.value.trim() || "";
+      const extra = inputVal.toLowerCase().split(/\s+/).filter(Boolean);
+
+      let filtered = items.filter(item => {
+        const t = item.title.toLowerCase();
+        if (selectVal !== "指定なし" && !t.includes(selectVal.toLowerCase())) return false;
+        return extra.every(k => t.includes(k));
       });
-      observer.observe(player, { attributes: true, attributeFilter: ["class"] });
-    }
+
+      filtered.sort((a, b) => sortDescending ? (b.orderId - a.orderId) : (a.orderId - b.orderId));
+
+      listContainer.innerHTML = "";
+      if (filtered.length === 0) {
+        listContainer.innerHTML = '<div style="padding:80px 20px; text-align:center; color:#888; font-size:16px;">該当する商品がありません</div>';
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      filtered.forEach(item => {
+        const a = document.createElement("a");
+        a.href = item.link;
+        a.style.cssText = "display:flex; padding:14px 0; border-bottom:1px solid #eee; text-decoration:none; color:inherit;";
+        a.innerHTML = `
+          <div style="width:64px; height:64px; background:#f0f0f0; border-radius:10px; margin-right:16px; flex-shrink:0; overflow:hidden;">
+            ${item.imgSrc ? `<img src="${item.imgSrc}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">` : ''}
+          </div>
+          <div style="flex:1;">
+            <div style="font-weight:600; font-size:15px; line-height:1.4;">${item.title}</div>
+            <div style="font-size:13px; color:#2ccce4; margin-top:6px;">開く →</div>
+          </div>
+        `;
+        frag.appendChild(a);
+      });
+      listContainer.appendChild(frag);
+    };
+
+    renderHeader();
+    modal.appendChild(header);
+    modal.appendChild(listContainer);
+    renderList();
+
+    // ライブラリの上に挿入
+    libraryContainer.parentNode.insertBefore(modal, libraryContainer);
   }
 
   // ==================== 修正版クローリング（line_items_page対応） ====================
@@ -216,61 +324,71 @@
       const titleEl = el.querySelector(".sky-pilot-file-heading");
       const title = titleEl?.innerText.trim() || "名称不明";
       const link = el.href;
+      let imgSrc = "";
+      const imgEl = el.querySelector("img.sky-pilot-product-thumbnail");
+      if (imgEl) {
+        imgSrc = imgEl.src || imgEl.getAttribute("data-src") || "";
+        // 相対URLを絶対URLに変換
+        if (imgSrc && !imgSrc.startsWith("http")) {
+          imgSrc = new URL(imgSrc, window.location.origin).href;
+        }
+      }
       const orderId = link.match(/\/orders\/(\d+)/)?.[1] ? parseInt(link.match(/\/orders\/(\d+)/)[1], 10) : 0;
-      items.push({ title, link, orderId });
+      items.push({ title, link, imgSrc, orderId });
     });
     return items;
   }
 
   // ==================== 一括ダウンロード（詳細ページ） ====================
-  function openBulkDownloadModal() {
+  async function openBulkDownloadModal() {
     const tracks = document.querySelectorAll(".skypilot-track-container .track");
-    if (tracks.length === 0) return;
+    if (tracks.length === 0) {
+      alert("このページにはダウンロード可能なオーディオファイルがありません。\n\n壁紙・PDFなどはページ下部のファイル名を直接クリックして手動で保存してください。");
+      return;
+    }
 
-    const files = [];
-    const history = getDownloadHistory();
+    const allFiles = [];
 
-    tracks.forEach((track, i) => {
-      let baseName = (track.querySelector(".track-name a, .track-name")?.innerText || `track_${i + 1}`).trim();
-      baseName = baseName.replace(/[\\/:*?"<>|]/g, "_");
+    for (let track of tracks) {
+      const actionIcon = track.querySelector(".action-icon");
+      if (!actionIcon) continue;
 
-      const urls = new Set();
-      track.querySelectorAll("a[href], audio[src], source[src]").forEach(el => {
-        if (el.href) urls.add(el.href);
-        if (el.src) urls.add(el.src);
-      });
+      const baseName = (track.querySelector(".track-name a, .track-name span")?.innerText || "track").trim().replace(/[\\/:*?"<>|]/g, "_");
 
-      urls.forEach(url => {
-        if (!url.startsWith("http")) return;
-        const lower = url.toLowerCase();
-        let ext = null;
+      actionIcon.click();
+      await new Promise(r => setTimeout(r, 300));
 
-        if (lower.includes(".wav")) ext = "wav";
-        else if (lower.includes(".mp3")) ext = "mp3";
-        else if (lower.includes(".zip")) ext = "zip";
-        else if (lower.includes(".pdf")) ext = "pdf";
-        else if (lower.includes(".flac")) ext = "flac";
-        else if (lower.includes(".m4a")) ext = "m4a";
-        else if (lower.includes(".jpg") || lower.includes(".png")) ext = "image";
+      const menu = document.querySelector('ul.rc-menu[data-menu-list="true"]');
+      if (menu) {
+        menu.querySelectorAll("a.menu-type").forEach(a => {
+          const url = a.href;
+          const text = a.innerText.trim();
+          let ext = null;
+          if (text.includes("MP3")) ext = "mp3";
+          else if (text.includes("WAV")) ext = "wav";
+          else if (text.includes("ZIP")) ext = "zip";
+          else if (text.includes("PDF")) ext = "pdf";
 
-        if (ext) {
-          const filename = ext === "image" ? baseName : (baseName.endsWith(`.${ext}`) ? baseName : `${baseName}.${ext}`);
-          const safeName = filename.replace(/[\/\\]/g, '／');
-          files.push({
-            url,
-            filename,
-            ext,
-            downloaded: history.includes(safeName)
-          });
-        }
-      });
-    });
+          if (ext && url.startsWith("http")) {
+            const filename = `${baseName}.${ext}`;
+            const safeName = filename.replace(/[\/\\]/g, '／');
+            allFiles.push({ url, filename, ext, downloaded: getDownloadHistory().includes(safeName) });
+          }
+        });
+        document.body.click(); // メニュー閉じる
+      }
+    }
+
+    if (allFiles.length === 0) {
+      alert("ダウンロード可能なオーディオファイルが見つかりませんでした。\n\n壁紙・PDFなどはページ下部のファイル名を直接クリックして保存してください。");
+      return;
+    }
 
     const uniqueFiles = [];
     const seen = new Set();
-    files.forEach(f => {
-      if (!seen.has(f.url)) {
-        seen.add(f.url);
+    allFiles.forEach(f => {
+      if (!seen.has(`${f.url}|${f.filename}`)) {
+        seen.add(`${f.url}|${f.filename}`);
         uniqueFiles.push(f);
       }
     });
@@ -279,32 +397,33 @@
     const downloadedCount = uniqueFiles.filter(f => f.downloaded).length;
 
     const modal = document.createElement("div");
-    modal.style.cssText = `
-      position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100002;
-      display:flex; align-items:center; justify-content:center; font-family:-apple-system,sans-serif;
-    `;
-
+    modal.style.cssText = `position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100002; display:flex; align-items:center; justify-content:center; font-family:-apple-system,sans-serif;`;
     modal.innerHTML = `
-      <div style="background:white; border-radius:16px; width:90%; max-width:380px; max-height:90%; overflow-y:auto; padding:20px;">
-        <h3 style="margin:0 0 16px; font-size:19px; font-weight:600;">一括ダウンロード設定</h3>
-        <div style="margin-bottom:16px;">
+      <div style="background:white; border-radius:16px; width:90%; max-width:420px; max-height:90%; overflow-y:auto; padding:24px;">
+        <h3 style="margin:0 0 16px; font-size:19px; font-weight:600; text-align:center;">一括ダウンロード</h3>
+        <div style="background:#f0f8ff; padding:12px; border-radius:8px; margin-bottom:16px; font-size:14px; line-height:1.5;">
+          <strong>※ 壁紙・PDF・特典画像について</strong><br>
+          ページ下部のファイル名を直接タップ／クリックしてください。<br>
+          自動取得はできません（クリック＝即ダウンロードのため）
+        </div>
+        <div style="margin-bottom:20px;">
           ${extensions.map(ext => {
             const count = uniqueFiles.filter(f => f.ext === ext).length;
-            return `<label style="display:flex; align-items:center; margin:10px 0; font-size:15px;">
-              <input type="checkbox" class="ext-cb" value="${ext}" checked style="width:20px;height:20px;margin-right:12px;">
-              <span style="font-weight:600; text-transform:uppercase;">.${ext}</span>
+            return `<label style="display:flex; align-items:center; margin:10px 0;">
+              <input type="checkbox" class="ext-cb" value="${ext}" checked style="width:22px;height:22px;margin-right:12px;">
+              <span style="font-weight:600;">.${ext.toUpperCase()}</span>
               <span style="color:#666; margin-left:6px;">(${count}個)</span>
             </label>`;
           }).join("")}
         </div>
-        <label style="display:flex; align-items:center; margin:16px 0 20px; font-size:14px;">
-          <input type="checkbox" id="skip-dl" ${downloadedCount > 0 ? "checked" : ""} style="width:18px;height:18px;margin-right:10px;">
-          <span>ダウンロード済みを除外する</span>
-          <span style="color:#888; font-size:12px; margin-left:6px;">(${downloadedCount}個)</span>
+        <label style="display:flex; align-items:center; margin:20px 0; font-size:15px;">
+          <input type="checkbox" id="skip-dl" ${downloadedCount > 0 ? "checked" : ""} style="width:20px;height:20px;margin-right:12px;">
+          <span>ダウンロード済みを除外</span>
+          <span style="color:#888; font-size:13px; margin-left:8px;">（${downloadedCount}個）</span>
         </label>
-        <div style="display:flex; gap:12px;">
-          <button id="cancel-btn" style="flex:1; padding:14px; background:#f0f0f0; border-radius:10px; font-weight:600; font-size:15px;">キャンセル</button>
-          <button id="start-btn" style="flex:1; padding:14px; background:#e42c64; color:white; border-radius:10px; font-weight:600; font-size:15px;">ダウンロード開始</button>
+        <div style="display:flex; gap:16px; margin-top:24px;">
+          <button id="cancel-btn" style="flex:1; padding:14px; background:#f0f0f0; border-radius:12px; font-weight:600;">キャンセル</button>
+          <button id="start-btn" style="flex:1; padding:14px; background:#e42c64; color:white; border-radius:12px; font-weight:600;">開始（${uniqueFiles.length}ファイル）</button>
         </div>
       </div>
     `;
@@ -318,17 +437,16 @@
       const targets = uniqueFiles.filter(f => selected.includes(f.ext) && !(skip && f.downloaded));
 
       if (targets.length === 0) {
-        alert("ダウンロード対象がありません");
+        alert("選択された条件でダウンロード対象がありません");
         return;
       }
-
       modal.remove();
       startBulkDownload(targets);
     };
   }
 
   async function startBulkDownload(files) {
-    if (!confirm(`${files.length}個のファイルをダウンロードしますか？`)) return;
+    if (!confirm(`${files.length}ファイルをダウンロードしますか？`)) return;
 
     const statusEl = document.getElementById("sp-tool-container")?.querySelector("div:last-child");
     if (statusEl) statusEl.textContent = "DL中";
@@ -339,23 +457,16 @@
       if (statusEl) statusEl.textContent = `${i + 1}/${files.length}`;
       try {
         await new Promise((resolve, reject) => {
-          GM_download({
-            url: f.url,
-            name: f.filename,
-            onload: resolve,
-            onerror: reject
-          });
+          GM_download({ url: f.url, name: f.filename, onload: resolve, onerror: reject });
         });
         addToHistory(f.filename);
         success++;
-      } catch (e) {
-        console.error("Download failed:", f.filename, e);
-      }
+      } catch (e) { console.error("DL failed:", f.filename); }
       if (i < files.length - 1) await new Promise(r => setTimeout(r, 1800));
     }
 
     if (statusEl) statusEl.textContent = "完了";
-    alert(`ダウンロード完了！\n${success}/${files.length} 件成功`);
+    alert(`ダウンロード完了！ ${success}/${files.length} 件`);
   }
 
   // ==================== キーワード設定モーダル ====================
@@ -504,7 +615,7 @@
         a.style.cssText = "display:flex; padding:14px 16px; border-bottom:1px solid #eee; text-decoration:none; color:inherit;";
         a.innerHTML = `
           <div style="width:64px; height:64px; background:#f0f0f0; border-radius:10px; margin-right:16px; flex-shrink:0; overflow:hidden;">
-            <div style="width:100%; height:100%; background:#ddd;"></div>
+            ${item.imgSrc ? `<img src="${item.imgSrc}" style="width:100%; height:100%; object-fit:cover; loading:lazy;" onerror="this.style.display='none'; this.parentNode.style.background='#ddd';">` : '<div style="width:100%; height:100%; background:#ddd;"></div>'}
           </div>
           <div style="flex:1;">
             <div style="font-weight:600; font-size:15px; line-height:1.4; color:#333;">${item.title}</div>

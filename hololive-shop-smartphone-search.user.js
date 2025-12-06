@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         ホロライブ公式ショップ検索（高速化・最適化版）
+// @name         ホロライブ公式ショップ検索
 // @namespace    http://ios.userscript/
 // @version      2.0
-// @description  スマホ用：超高速クローリング・検索・ソート・設定機能付き
-// @author       demupe3 (optimized by assistant)
+// @description  スマホ用：超高速・全件取得・画像表示・キーワード設定完備
+// @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads*
 // @grant        none
 // @license      MIT
@@ -23,8 +23,8 @@
     "轟はじめ", "響咲リオナ", "虎金妃笑虎", "水宮枢", "輪堂千速", "綺々羅々ヴィヴィ"
   ];
 
-  const STORAGE_KEY_DATA = "holo_shop_ios_data_v2";
-  const STORAGE_KEY_CONFIG = "holo_shop_ios_config_v2";
+  const STORAGE_KEY_DATA = "holo_shop_ios_data_v3";
+  const STORAGE_KEY_CONFIG = "holo_shop_ios_config_v3";
 
   let cachedItems = null;
   let cachedKeywords = null;
@@ -42,7 +42,7 @@
   }
 
   function loadItems() {
-    if (cachedItems) return cachedItems;
+    if (cachedItems !== null) return cachedItems;
     const saved = localStorage.getItem(STORAGE_KEY_DATA);
     cachedItems = saved ? JSON.parse(saved) : null;
     return cachedItems;
@@ -53,7 +53,7 @@
     localStorage.setItem(STORAGE_KEY_DATA, JSON.stringify(items));
   }
 
-  // UI作成（フローティングボタン）
+  // フローティングボタン
   function createFloatingButton() {
     if (document.getElementById("sp-tool-container")) return;
 
@@ -71,34 +71,41 @@
 
     const hasData = !!loadItems();
     container.innerHTML = `
-      <div id="sp-main-btn" style="font-size:28px;">${hasData ? "🔍" : "📥"}</div>
+      <div id="sp-main-btn" style="font-size:28px;">${hasData ? "検索" : "取得"}</div>
       <div id="sp-status" style="font-size:9px; margin-top:2px;">${hasData ? "検索" : "取得"}</div>
     `;
 
     container.onclick = () => {
       const items = loadItems();
-      if (items) {
-        showResults(items);
-      } else if (confirm("購入データをすべて読み込みますか？\n（通常1〜2分で完了します）")) {
-        startCrawling();
-      }
+      if (items) showResults(items);
+      else if (confirm("購入データをすべて読み込みますか？\n（1〜2分で完了）")) startCrawling();
     };
 
     document.body.appendChild(container);
   }
 
-  // 高速クローリング（?page=n 直指定）
+  // 完全修正版クローリング（line_items_page対応）
   async function startCrawling() {
     const container = document.getElementById("sp-tool-container");
     const status = document.getElementById("sp-status");
     container.style.opacity = "0.6";
     status.textContent = "読込中";
 
-    const allItems = [];
+    // 現在のURLからorderIdとcustomerIdを抽出
+    const urlMatch = location.href.match(/\/orders\/(\d+)[^?]*\?logged_in_customer_id=(\d+)/);
+    if (!urlMatch) {
+      alert("ページ構造が変更された可能性があります。ログイン状態を確認してください。");
+      container.style.opacity = "1";
+      return;
+    }
+    const [, orderId, customerId] = urlMatch;
+    const baseUrl = `https://shop.hololivepro.com/apps/downloads/orders/${orderId}?logged_in_customer_id=${customerId}`;
+
+    let allItems = [];
     let page = 1;
 
     while (true) {
-      const url = `https://shop.hololivepro.com/apps/downloads/?page=${page}`;
+      const url = `${baseUrl}&line_items_page=${page}`;
       status.textContent = `P.${page}`;
 
       let html;
@@ -112,37 +119,45 @@
       }
 
       const doc = new DOMParser().parseFromString(html, "text/html");
-      const items = extractItemsFromDoc(doc);
+      const items = extractItems(doc);
 
       if (items.length === 0) break;
 
       allItems.push(...items);
       page++;
-
-      // サーバー負荷軽減（300msで十分高速）
       await new Promise(r => setTimeout(r, 300));
     }
 
     saveItems(allItems);
-
-    document.getElementById("sp-main-btn").textContent = "🔍";
+    document.getElementById("sp-main-btn").textContent = "検索";
     status.textContent = "検索";
     container.style.opacity = "1";
 
-    alert(`読み込み完了！\n合計 ${allItems.length} 件の商品を検出しました。`);
+    alert(`取得完了！\n合計 ${allItems.length} 件の商品を検出しました。`);
     showResults(allItems);
   }
 
-  function extractItemsFromDoc(doc) {
+  function extractItems(doc) {
     const items = [];
     doc.querySelectorAll("a.sky-pilot-list-item").forEach(el => {
       const titleEl = el.querySelector(".sky-pilot-file-heading");
       const title = titleEl?.innerText.trim() || "名称不明";
       const link = el.href;
-      const match = link.match(/\/orders\/(\d+)/);
-      const orderId = match ? parseInt(match[1], 10) : 0;
 
-      items.push({ title, link, orderId });
+      // 画像URL取得
+      let imgSrc = "";
+      const imgEl = el.querySelector("img.sky-pilot-product-thumbnail");
+      if (imgEl) {
+        imgSrc = imgEl.src || imgEl.dataset.src || "";
+        if (imgSrc && !imgSrc.startsWith("http")) {
+          imgSrc = new URL(imgSrc, location.origin).href;
+        }
+      }
+
+      const orderIdMatch = link.match(/\/orders\/(\d+)/);
+      const orderId = orderIdMatch ? parseInt(orderIdMatch[1], 10) : 0;
+
+      items.push({ title, link, imgSrc, orderId });
     });
     return items;
   }
@@ -226,7 +241,7 @@
     document.body.appendChild(modal);
   }
 
-  // 検索結果モーダル
+  // 検索結果モーダル（画像あり・キーワード設定後もボタン死なない）
   function showResults(items) {
     if (document.getElementById("sp-results-modal")) return;
 
@@ -242,6 +257,9 @@
     const header = document.createElement("div");
     header.style.cssText = "background:#f8f9fa; border-bottom:1px solid #ddd; padding:15px 15px 10px; padding-top:50px;";
 
+    const listContainer = document.createElement("div");
+    listContainer.style.cssText = "flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;";
+
     const renderHeader = () => {
       const keywords = loadKeywords();
       const valid = keywords.filter(k => k === "指定なし" || items.some(i => i.title.toLowerCase().includes(k.toLowerCase())));
@@ -255,9 +273,9 @@
         <div style="display:flex; gap:8px; margin-bottom:8px;">
           <div style="flex:1; position:relative;">
             <select id="select-kw" style="width:100%; padding:10px; font-size:16px; border:1px solid #ccc; border-radius:8px; background:#fff; appearance:none;">${options}</select>
-            <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); pointer-events:none; color:#888;">▼</span>
+            <span style="position:absolute; right:10px; top:50%; transform:translateY(-50%); pointer-events:none; color:#888;">Down Arrow</span>
           </div>
-          <button id="config-btn" style="width:44px; height:44px; border:1px solid #ccc; background:#fff; border-radius:8px; font-size:20px;">⚙️</button>
+          <button id="config-btn" style="width:44px; height:44px; border:1px solid #ccc; background:#fff; border-radius:8px; font-size:20px;">Settings</button>
         </div>
         <div style="display:flex; gap:8px;">
           <input id="text-search" type="text" placeholder="追加キーワード (例: 2024)" style="flex:1; padding:10px; font-size:16px; border:2px solid #2ccce4; border-radius:8px;">
@@ -267,20 +285,41 @@
           <button id="refresh-btn" style="font-size:13px; color:#2ccce4; background:none; border:none;">データを再取得</button>
         </div>
       `;
+
+      // イベントは一度だけ登録
+      header.querySelector("#close-btn").onclick = () => modal.remove();
+      header.querySelector("#text-search").addEventListener("input", renderList);
+      header.querySelector("#select-kw").addEventListener("change", renderList);
+      header.querySelector("#sort-btn").onclick = () => {
+        sortDescending = !sortDescending;
+        header.querySelector("#sort-btn").textContent = sortDescending ? "新着順" : "古い順";
+        renderList();
+      };
+      header.querySelector("#refresh-btn").onclick = () => {
+        if (confirm("最新データを再取得しますか？")) {
+          modal.remove();
+          localStorage.removeItem(STORAGE_KEY_DATA);
+          cachedItems = null;
+          startCrawling();
+        }
+      };
+      header.querySelector("#config-btn").onclick = () => {
+        openSettingsModal(() => {
+          renderHeader();  // キーワード更新後に再描画（イベントは維持）
+          renderList();
+        });
+      };
     };
 
-    const listContainer = document.createElement("div");
-    listContainer.style.cssText = "flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;";
-
     const renderList = () => {
-      const selectVal = header.querySelector("#select-kw").value;
-      const inputVal = header.querySelector("#text-search").value.trim();
-      const extraKeywords = inputVal.toLowerCase().split(/\s+/).filter(Boolean);
+      const selectVal = header.querySelector("#select-kw")?.value || "指定なし";
+      const inputVal = header.querySelector("#text-search")?.value.trim() || "";
+      const extra = inputVal.toLowerCase().split(/\s+/).filter(Boolean);
 
       let filtered = items.filter(item => {
-        const title = item.title.toLowerCase();
-        if (selectVal !== "指定なし" && !title.includes(selectVal.toLowerCase())) return false;
-        return extraKeywords.every(k => title.includes(k));
+        const t = item.title.toLowerCase();
+        if (selectVal !== "指定なし" && !t.includes(selectVal.toLowerCase())) return false;
+        return extra.every(k => t.includes(k));
       });
 
       filtered.sort((a, b) => sortDescending ? (b.orderId - a.orderId) : (a.orderId - b.orderId));
@@ -298,11 +337,11 @@
         a.style.cssText = "display:flex; padding:12px 15px; border-bottom:1px solid #eee; text-decoration:none; color:inherit;";
         a.innerHTML = `
           <div style="width:60px; height:60px; background:#f0f0f0; border-radius:8px; margin-right:15px; overflow:hidden; flex-shrink:0;">
-            <div style="width:100%; height:100%; background:#ddd;"></div>
+            ${item.imgSrc ? `<img src="${item.imgSrc}" style="width:100%; height:100%; object-fit:cover;" loading="lazy">` : '<div style="width:100%; height:100%; background:#ddd;"></div>'}
           </div>
           <div style="flex:1;">
             <div style="font-weight:600; font-size:14px; line-height:1.4; margin-bottom:4px; color:#333;">${item.title}</div>
-            <div style="font-size:12px; color:#2ccce4;">開く →</div>
+            <div style="font-size:12px; color:#2ccce4;">開く Right Arrow</div>
           </div>
         `;
         frag.appendChild(a);
@@ -314,34 +353,6 @@
     modal.appendChild(header);
     modal.appendChild(listContainer);
     renderList();
-
-    // イベントバインディング
-    const bindEvents = () => {
-      header.querySelector("#text-search").addEventListener("input", renderList);
-      header.querySelector("#select-kw").addEventListener("change", renderList);
-      header.querySelector("#close-btn").addEventListener("click", () => modal.remove());
-      header.querySelector("#sort-btn").addEventListener("click", () => {
-        sortDescending = !sortDescending;
-        header.querySelector("#sort-btn").textContent = sortDescending ? "新着順" : "古い順";
-        renderList();
-      });
-      header.querySelector("#refresh-btn").addEventListener("click", () => {
-        if (confirm("最新データを再取得しますか？")) {
-          modal.remove();
-          localStorage.removeItem(STORAGE_KEY_DATA);
-          cachedItems = null;
-          startCrawling();
-        }
-      });
-      header.querySelector("#config-btn").addEventListener("click", () => {
-        openSettingsModal(() => {
-          renderHeader();
-          bindEvents();
-          renderList();
-        });
-      });
-    };
-    bindEvents();
 
     document.body.appendChild(modal);
   }
