@@ -2,7 +2,7 @@
 // @name         ホロライブ公式ショップ検索
 // @namespace    http://ios.userscript/
 // @version      1.1
-// @description  iPhone用：購入済み商品の検索・ソート・設定機能付き（メンバーリスト修正版）
+// @description  スマホ用：購入済み商品の検索・ソート・設定機能付き
 // @author       demupe3
 // @match        https://shop.hololivepro.com/apps/downloads/*
 // @grant        none
