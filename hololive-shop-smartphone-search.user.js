@@ -23,8 +23,8 @@
     "轟はじめ", "響咲リオナ", "虎金妃笑虎", "水宮枢", "輪堂千速", "綺々羅々ヴィヴィ"
   ];
 
-  const STORAGE_KEY_DATA = "holo_shop_ios_data_v3";
-  const STORAGE_KEY_CONFIG = "holo_shop_ios_config_v3";
+  const STORAGE_KEY_DATA = "holo_shop_ios_data_v2";
+  const STORAGE_KEY_CONFIG = "holo_shop_ios_config_v2";
 
   let cachedItems = null;
   let cachedKeywords = null;
