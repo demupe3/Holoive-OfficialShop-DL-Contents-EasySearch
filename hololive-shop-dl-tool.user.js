@@ -102,7 +102,7 @@
     document.body.appendChild(btn);
   }
 
-  // ライブラリ内ポップアップ検索モーダル（完璧版）
+  // ライブラリ内ポップアップ検索モーダル
   function showSearchModalInLibrary(items) {
     const existing = document.getElementById("sp-results-modal");
     if (existing) existing.remove();

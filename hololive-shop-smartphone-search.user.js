@@ -84,7 +84,7 @@
     document.body.appendChild(container);
   }
 
-  // 完全修正版クローリング（line_items_page対応）
+  // クローリング（line_items_page対応）
   async function startCrawling() {
     const container = document.getElementById("sp-tool-container");
     const status = document.getElementById("sp-status");
@@ -241,7 +241,7 @@
     document.body.appendChild(modal);
   }
 
-  // 検索結果モーダル（画像あり・キーワード設定後もボタン死なない）
+  // 検索結果モーダル
   function showResults(items) {
     if (document.getElementById("sp-results-modal")) return;
 
