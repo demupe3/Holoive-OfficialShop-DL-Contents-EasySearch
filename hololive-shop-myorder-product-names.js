@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ホロライブ公式ショップ：マイオーダー商品名表示
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  マイオーダー表に商品名＋Variantを自動追加。発送予定日列は削除し、発送状況が「未発送」の場合のみ発送予定日を小さく表示。右下の不要な浮動ボタンも削除。
+// @version      1.2
+// @description  マイオーダー表に商品名＋Variant自動追加＋発送予定日（未発送時のみ）表示＋スマートページネーション（前後4ページ＋最初/最後＋直接入力）
 // @author       demupe3
 // @match        https://shop.hololivepro.com/account*
 // @grant        none
@@ -18,16 +18,13 @@
     primary: "#2ccce4",
     accent: "#e42c64",
     text: "#1f2937",
-    muted: "#64748b",
-    surface: "#f8f9fa"
+    muted: "#64748b"
   };
 
   function loadCache() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return {};
     let cache = JSON.parse(saved);
-
-    // 旧キャッシュ互換性対応
     Object.keys(cache).forEach(key => {
       if (Array.isArray(cache[key])) {
         cache[key] = { products: cache[key], shippingDate: "" };
@@ -48,7 +45,6 @@
       const html = await res.text();
       const doc = new DOMParser().parseFromString(html, "text/html");
 
-      // 商品情報
       const groups = new Map();
       doc.querySelectorAll('tr.CartItem').forEach(row => {
         const titleEl = row.querySelector('.CartItem__Title a') || row.querySelector('.CartItem__Title');
@@ -73,7 +69,6 @@
         variants: data.variants
       }));
 
-      // 発送予定日取得
       let shippingDate = "";
       const descs = doc.querySelectorAll('.SectionHeader__Description');
       for (const p of descs) {
@@ -106,7 +101,7 @@
     `;
 
     if (hasMultipleVariants) {
-      const variantList = mainGroup.variants.map(v => 
+      const variantList = mainGroup.variants.map(v =>
         `<span style="display:inline-block; background:#f0f9ff; color:#0e7490; padding:2px 8px; border-radius:9999px; font-size:12px; margin:2px;">${v.variant}</span>`
       ).join('');
       html += `<div style="margin-top:6px; font-size:12.5px; line-height:1.4;"><span style="color:${COLORS.muted}; font-weight:600;">Variant:</span><br>${variantList}</div>`;
@@ -117,7 +112,6 @@
     html += `</div></div>`;
     td.innerHTML = html;
 
-    // ホバーポップアップ
     if (hasMultipleVariants || groups.length > 1) {
       let popupItems = '';
       groups.forEach(group => {
@@ -144,8 +138,8 @@
     const headerRow = table.querySelector('thead tr');
     if (!headerRow) return;
 
-    // 1. 発送予定日列を先に削除
-    const shippingTh = Array.from(headerRow.querySelectorAll('th')).find(th => 
+    // 発送予定日列を削除
+    const shippingTh = Array.from(headerRow.querySelectorAll('th')).find(th =>
       th.textContent.includes('発送予定日') || th.textContent.includes('発送予定')
     );
     let shippingColIndex = -1;
@@ -157,7 +151,7 @@
       });
     }
 
-    // 2. 商品名列追加
+    // 商品名列追加
     const productTh = document.createElement('th');
     productTh.setAttribute('data-col', 'product');
     productTh.style.width = "360px";
@@ -165,7 +159,7 @@
     productTh.innerHTML = `商品名 <button id="sp-refresh-all" style="margin-left:8px; background:none; border:none; color:${COLORS.primary}; font-size:18px; cursor:pointer;">🔄</button>`;
     headerRow.insertBefore(productTh, headerRow.children[1]);
 
-    // 3. 各行に商品名セルを追加
+    // 商品名セル追加
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     const fetchPromises = [];
 
@@ -199,8 +193,8 @@
 
     if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-    // 4. 発送状況の下に発送予定日を表示（発送済の場合は非表示）
-    const statusCells = table.querySelectorAll('tbody tr td:nth-child(5)'); // 発送状況列
+    // 発送状況の下に発送予定日を表示（未発送のみ）
+    const statusCells = table.querySelectorAll('tbody tr td:nth-child(5)');
     statusCells.forEach(td => {
       const row = td.parentNode;
       const orderLink = row.querySelector('a[href*="/account/orders/"]');
@@ -213,9 +207,7 @@
       const cached = cache[orderHash];
       if (!cached || !cached.shippingDate) return;
 
-      // 発送状況のテキストを確認
-      const statusText = td.textContent.trim();
-      if (statusText.includes('発送済')) return; // 発送済の場合は表示しない
+      if (td.textContent.trim().includes('発送済')) return;
 
       const dateHTML = `<div style="font-size:12px; color:${COLORS.muted}; margin-top:4px; line-height:1.3;">${cached.shippingDate}</div>`;
       td.innerHTML += dateHTML;
@@ -226,14 +218,96 @@
     if (refreshBtn) {
       refreshBtn.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm("すべての注文の商品情報を再取得しますか？\n（キャッシュをクリアします）")) return;
+        if (!confirm("すべての注文の商品情報を再取得しますか？")) return;
         localStorage.removeItem(STORAGE_KEY);
         enhanceMyOrdersTable();
       };
     }
+
+    // スマートページネーション
+    createSmartPagination();
   }
 
-  // 右下の浮動ボタンはユーザーの希望により削除
+  function createSmartPagination() {
+    const oldPagination = document.querySelector('.Pagination');
+    if (!oldPagination) return;
+
+    const currentPageMatch = window.location.search.match(/page=(\d+)/);
+    let current = currentPageMatch ? parseInt(currentPageMatch[1], 10) : 1;
+
+    // 総ページ数を正確に取得
+    let total = 1;
+    const pageLinks = document.querySelectorAll('a[href*="/account?page="]');
+    pageLinks.forEach(link => {
+      const m = link.href.match(/page=(\d+)/);
+      if (m) {
+        const num = parseInt(m[1], 10);
+        if (num > total) total = num;
+      }
+    });
+
+    let html = `<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center; font-size:15px;">`;
+
+    // 前へ
+    if (current > 1) {
+      html += `<a href="/account?page=${current-1}" class="Pagination_arrow -prev prtc_pagenation_item" style="padding:8px 14px;">‹</a>`;
+    }
+
+    // 1ページ目
+    html += `<a href="/account?page=1" class="Pagination_dot prtc_pagenation_item ${current === 1 ? 'isActive' : ''}">1</a>`;
+
+    // 中央部（前後4ページ）
+    const start = Math.max(2, current - 4);
+    const end = Math.min(total - 1, current + 4);
+
+    if (start > 2) html += `<span style="padding:0 6px; color:${COLORS.muted};">…</span>`;
+
+    for (let i = start; i <= end; i++) {
+      html += `<a href="/account?page=${i}" class="Pagination_dot prtc_pagenation_item ${i === current ? 'isActive' : ''}">${i}</a>`;
+    }
+
+    if (end < total - 1) html += `<span style="padding:0 6px; color:${COLORS.muted};">…</span>`;
+
+    // 最終ページ
+    if (total > 1) {
+      html += `<a href="/account?page=${total}" class="Pagination_dot prtc_pagenation_item ${current === total ? 'isActive' : ''}">${total}</a>`;
+    }
+
+    // 次へ
+    if (current < total) {
+      html += `<a href="/account?page=${current+1}" class="Pagination_arrow -next prtc_pagenation_item" style="padding:8px 14px;">›</a>`;
+    }
+
+    // 直接入力
+    html += `
+      <div style="margin-left:24px; display:flex; align-items:center; gap:8px; font-size:14px; white-space:nowrap;">
+        <span style="color:${COLORS.muted};">ページ</span>
+        <input type="number" id="jump-to-page" min="1" max="${total}" value="${current}"
+               style="width:68px; padding:7px 10px; border:1px solid #cbd5e1; border-radius:8px; text-align:center; font-size:15px;">
+        <button id="jump-go" style="padding:7px 18px; background:${COLORS.primary}; color:white; border:none; border-radius:8px; font-weight:700; cursor:pointer;">移動</button>
+      </div>
+    `;
+
+    html += `</div>`;
+
+    oldPagination.innerHTML = html;
+
+    // 移動機能
+    const goBtn = document.getElementById('jump-go');
+    const input = document.getElementById('jump-to-page');
+    if (goBtn && input) {
+      goBtn.onclick = () => {
+        let page = parseInt(input.value, 10);
+        if (page < 1) page = 1;
+        if (page > total) page = total;
+        window.location.href = `/account?page=${page}`;
+      };
+
+      input.addEventListener('keypress', e => {
+        if (e.key === 'Enter') goBtn.click();
+      });
+    }
+  }
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", enhanceMyOrdersTable);
