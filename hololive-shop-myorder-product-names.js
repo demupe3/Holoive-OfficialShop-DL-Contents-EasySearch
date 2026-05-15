@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         hololive-shop-myorder-product-names
+// @name         ホロライブ公式ショップ：マイオーダー商品名表示
 // @namespace    http://tampermonkey.net/
 // @version      1.1
 // @description  マイオーダー表に商品名＋Variantを自動追加。発送予定日列は削除し、発送状況が「未発送」の場合のみ発送予定日を小さく表示。右下の不要な浮動ボタンも削除。
