@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ホロライブ公式ショップ：マイオーダー商品名表示
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  マイオーダー表に商品名＋Variant自動追加＋発送予定日（未発送時のみ）表示＋スマートページネーション（前後4ページ＋最初/最後＋直接入力）
+// @version      1.3
+// @description  マイオーダー表に商品名＋Variant自動追加＋未発送リスト（検出中表示＋30分キャッシュ）
 // @author       demupe3
 // @match        https://shop.hololivepro.com/account*
 // @grant        none
@@ -13,6 +13,7 @@
   "use strict";
 
   const STORAGE_KEY = "holo_account_order_cache_v2_1";
+  const PENDING_CACHE_KEY = "holo_pending_orders_cache";
 
   const COLORS = {
     primary: "#2ccce4",
@@ -21,6 +22,10 @@
     muted: "#64748b"
   };
 
+  let pendingOrders = [];
+  let isCrawling = false;
+
+  // ====================== キャッシュ ======================
   function loadCache() {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return {};
@@ -37,6 +42,25 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
   }
 
+  function loadPendingCache() {
+    const saved = localStorage.getItem(PENDING_CACHE_KEY);
+    if (!saved) return null;
+    const data = JSON.parse(saved);
+    if (Date.now() - data.timestamp > 30 * 60 * 1000) {
+      localStorage.removeItem(PENDING_CACHE_KEY);
+      return null;
+    }
+    return data.orders;
+  }
+
+  function savePendingCache(orders) {
+    localStorage.setItem(PENDING_CACHE_KEY, JSON.stringify({
+      orders: orders,
+      timestamp: Date.now()
+    }));
+  }
+
+  // ====================== 商品情報取得 ======================
   async function fetchAllProductsInOrder(orderUrl) {
     try {
       const res = await fetch(orderUrl, { credentials: "include" });
@@ -81,7 +105,6 @@
 
       return { products: products.length > 0 ? products : [{ name: "商品情報なし", img: "", variants: [] }], shippingDate };
     } catch (e) {
-      console.error("取得失敗:", orderUrl, e);
       return { products: [{ name: "取得失敗", img: "", variants: [] }], shippingDate: "" };
     }
   }
@@ -130,6 +153,162 @@
     }
   }
 
+  // ====================== 未発送リスト ======================
+  async function crawlPendingOrders() {
+    if (isCrawling) return;
+    isCrawling = true;
+
+    // キャッシュ確認
+    const cached = loadPendingCache();
+    if (cached) {
+      pendingOrders = cached;
+      if (pendingOrders.length > 0) showPendingButton();
+      isCrawling = false;
+      return;
+    }
+
+    showCheckingToast();
+
+    pendingOrders = [];
+    const now = new Date();
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    let page = 1;
+    const maxPages = 15;
+
+    while (page <= maxPages) {
+      try {
+        const url = page === 1 ? "/account" : `/account?page=${page}`;
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) break;
+
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, "text/html");
+
+        const rows = doc.querySelectorAll('table.AccountTable tbody tr');
+
+        for (const row of rows) {
+          const dateTd = row.querySelector('td:nth-child(2)');
+          const statusTd = row.querySelector('td:nth-child(5)');
+          const orderLink = row.querySelector('a[href*="/account/orders/"]');
+
+          if (!dateTd || !statusTd || !orderLink) continue;
+
+          const orderDateStr = dateTd.textContent.trim();
+          const statusText = statusTd.textContent.trim();
+          const orderUrl = orderLink.href;
+
+          let orderDate = null;
+          const match = orderDateStr.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+          if (match) {
+            orderDate = new Date(parseInt(match[1]), parseInt(match[2])-1, parseInt(match[3]));
+          }
+
+          if (!orderDate || isNaN(orderDate.getTime()) || orderDate < oneYearAgo) continue;
+          if (!statusText.includes('未発送') && !statusText.includes('発送予定')) continue;
+
+          pendingOrders.push({ orderUrl, orderDate: orderDateStr, status: statusText });
+        }
+
+        if (rows.length < 5 && page > 3) break;
+        page++;
+        await new Promise(r => setTimeout(r, 600));
+      } catch (e) {
+        break;
+      }
+    }
+
+    savePendingCache(pendingOrders);
+    removeCheckingToast();
+
+    if (pendingOrders.length > 0) {
+      showPendingButton();
+    }
+    isCrawling = false;
+  }
+
+  // 検出中トースト
+  function showCheckingToast() {
+    const existing = document.getElementById('sp-checking-toast');
+    if (existing) return;
+
+    const toast = document.createElement('div');
+    toast.id = 'sp-checking-toast';
+    toast.style.cssText = `
+      position:fixed; bottom:100px; left:50%; transform:translateX(-50%);
+      background:#334155; color:white; padding:12px 24px; border-radius:9999px;
+      font-size:14px; z-index:99999; box-shadow:0 4px 15px rgba(0,0,0,0.3);
+      display:flex; align-items:center; gap:10px;
+    `;
+    toast.innerHTML = `🔍 未発送商品をチェック中...`;
+    document.body.appendChild(toast);
+  }
+
+  function removeCheckingToast() {
+    const toast = document.getElementById('sp-checking-toast');
+    if (toast) toast.remove();
+  }
+
+  function showPendingButton() {
+    if (document.getElementById('sp-pending-btn')) return;
+
+    const btn = document.createElement('div');
+    btn.id = 'sp-pending-btn';
+    btn.style.cssText = `
+      position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
+      background:linear-gradient(145deg, #e42c64, #c81e52); color:white;
+      padding:14px 36px; border-radius:9999px; font-weight:700; font-size:16.5px;
+      box-shadow:0 10px 30px -8px rgba(228,44,100,0.5); cursor:pointer; z-index:99999;
+    `;
+    btn.innerHTML = `📦 未発送商品 <strong>${pendingOrders.length}</strong> 件を表示`;
+    btn.onclick = showPendingModal;
+    document.body.appendChild(btn);
+  }
+
+  async function showPendingModal() {
+    const modal = document.createElement('div');
+    modal.style.cssText = `position:fixed; inset:0; background:rgba(15,23,42,0.92); backdrop-filter:blur(12px); z-index:100002; display:flex; align-items:center; justify-content:center;`;
+
+    modal.innerHTML = `
+      <div style="background:white; border-radius:24px; width:92%; max-width:680px; max-height:88vh; overflow-y:auto; padding:28px;">
+        <h2 style="margin:0 0 24px; text-align:center; font-size:24px;">📦 未発送商品一覧 (${pendingOrders.length}件)</h2>
+        <div id="pending-content" style="min-height:120px; text-align:center; padding:40px 0;">取得中...</div>
+        <div style="text-align:center; margin-top:24px;">
+          <button id="modal-close" style="padding:14px 48px; background:#e2e8f0; border:none; border-radius:9999px; font-size:16px; font-weight:700; cursor:pointer;">閉じる</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const contentDiv = document.getElementById('pending-content');
+    const closeBtn = document.getElementById('modal-close');
+    closeBtn.onclick = () => modal.remove();
+
+    const promises = pendingOrders.map(order => fetchAllProductsInOrder(order.orderUrl));
+    const results = await Promise.all(promises);
+
+    let html = '';
+    results.forEach((data, i) => {
+      const order = pendingOrders[i];
+      const main = data.products[0] || { name: "商品情報なし", img: "" };
+      html += `
+        <div style="background:#f8fafc; border-radius:16px; padding:18px; margin-bottom:14px; border-left:5px solid ${COLORS.accent};">
+          <div style="display:flex; gap:16px;">
+            ${main.img ? `<img src="${main.img}" style="width:78px;height:78px;object-fit:cover;border-radius:12px;">` : ''}
+            <div style="flex:1;">
+              <div style="font-weight:700;font-size:16.5px;">${main.name}</div>
+              <div style="margin-top:6px;color:${COLORS.muted};">${order.orderDate}</div>
+              ${data.shippingDate ? `<div style="margin-top:6px;color:#e42c64;font-weight:600;">${data.shippingDate}</div>` : ''}
+            </div>
+          </div>
+        </div>`;
+    });
+
+    contentDiv.innerHTML = html || '<p style="text-align:center;padding:60px;color:#888;">未発送商品はありません</p>';
+  }
+
+  // ====================== メイン処理 ======================
   async function enhanceMyOrdersTable() {
     const table = document.querySelector('table.AccountTable.Table--large') || document.querySelector('table.AccountTable');
     if (!table || table.querySelector('th[data-col="product"]')) return;
@@ -138,16 +317,15 @@
     const headerRow = table.querySelector('thead tr');
     if (!headerRow) return;
 
-    // 発送予定日列を削除
+    // 発送予定日列削除
     const shippingTh = Array.from(headerRow.querySelectorAll('th')).find(th =>
       th.textContent.includes('発送予定日') || th.textContent.includes('発送予定')
     );
-    let shippingColIndex = -1;
     if (shippingTh) {
-      shippingColIndex = Array.from(headerRow.children).indexOf(shippingTh);
+      const idx = Array.from(headerRow.children).indexOf(shippingTh);
       shippingTh.remove();
       table.querySelectorAll('tbody tr').forEach(row => {
-        if (row.children[shippingColIndex]) row.children[shippingColIndex].remove();
+        if (row.children[idx]) row.children[idx].remove();
       });
     }
 
@@ -193,7 +371,7 @@
 
     if (fetchPromises.length > 0) await Promise.all(fetchPromises);
 
-    // 発送状況の下に発送予定日を表示（未発送のみ）
+    // 発送予定日表示（未発送のみ）
     const statusCells = table.querySelectorAll('tbody tr td:nth-child(5)');
     statusCells.forEach(td => {
       const row = td.parentNode;
@@ -213,7 +391,6 @@
       td.innerHTML += dateHTML;
     });
 
-    // 一括更新ボタン
     const refreshBtn = document.getElementById('sp-refresh-all');
     if (refreshBtn) {
       refreshBtn.onclick = async (e) => {
@@ -224,7 +401,6 @@
       };
     }
 
-    // スマートページネーション
     createSmartPagination();
   }
 
@@ -235,7 +411,6 @@
     const currentPageMatch = window.location.search.match(/page=(\d+)/);
     let current = currentPageMatch ? parseInt(currentPageMatch[1], 10) : 1;
 
-    // 総ページ数を正確に取得
     let total = 1;
     const pageLinks = document.querySelectorAll('a[href*="/account?page="]');
     pageLinks.forEach(link => {
@@ -248,15 +423,10 @@
 
     let html = `<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center; font-size:15px;">`;
 
-    // 前へ
-    if (current > 1) {
-      html += `<a href="/account?page=${current-1}" class="Pagination_arrow -prev prtc_pagenation_item" style="padding:8px 14px;">‹</a>`;
-    }
+    if (current > 1) html += `<a href="/account?page=${current-1}" class="Pagination_arrow -prev prtc_pagenation_item" style="padding:8px 14px;">‹</a>`;
 
-    // 1ページ目
     html += `<a href="/account?page=1" class="Pagination_dot prtc_pagenation_item ${current === 1 ? 'isActive' : ''}">1</a>`;
 
-    // 中央部（前後4ページ）
     const start = Math.max(2, current - 4);
     const end = Math.min(total - 1, current + 4);
 
@@ -268,17 +438,10 @@
 
     if (end < total - 1) html += `<span style="padding:0 6px; color:${COLORS.muted};">…</span>`;
 
-    // 最終ページ
-    if (total > 1) {
-      html += `<a href="/account?page=${total}" class="Pagination_dot prtc_pagenation_item ${current === total ? 'isActive' : ''}">${total}</a>`;
-    }
+    if (total > 1) html += `<a href="/account?page=${total}" class="Pagination_dot prtc_pagenation_item ${current === total ? 'isActive' : ''}">${total}</a>`;
 
-    // 次へ
-    if (current < total) {
-      html += `<a href="/account?page=${current+1}" class="Pagination_arrow -next prtc_pagenation_item" style="padding:8px 14px;">›</a>`;
-    }
+    if (current < total) html += `<a href="/account?page=${current+1}" class="Pagination_arrow -next prtc_pagenation_item" style="padding:8px 14px;">›</a>`;
 
-    // 直接入力
     html += `
       <div style="margin-left:24px; display:flex; align-items:center; gap:8px; font-size:14px; white-space:nowrap;">
         <span style="color:${COLORS.muted};">ページ</span>
@@ -292,7 +455,6 @@
 
     oldPagination.innerHTML = html;
 
-    // 移動機能
     const goBtn = document.getElementById('jump-go');
     const input = document.getElementById('jump-to-page');
     if (goBtn && input) {
@@ -302,7 +464,6 @@
         if (page > total) page = total;
         window.location.href = `/account?page=${page}`;
       };
-
       input.addEventListener('keypress', e => {
         if (e.key === 'Enter') goBtn.click();
       });
@@ -310,8 +471,12 @@
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", enhanceMyOrdersTable);
+    document.addEventListener("DOMContentLoaded", () => {
+      enhanceMyOrdersTable();
+      setTimeout(crawlPendingOrders, 1600);
+    });
   } else {
     enhanceMyOrdersTable();
+    setTimeout(crawlPendingOrders, 1600);
   }
 })();
