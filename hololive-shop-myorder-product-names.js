@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ホロライブ公式ショップ：マイオーダー商品名表示
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  マイオーダー表に商品名＋種類自動追加＋未発送リスト（検出中表示＋30分キャッシュ） [refactored]
 // @author       demupe3
 // @match        https://shop.hololivepro.com/account*
@@ -20,6 +20,7 @@
     pendingCacheMs: 30 * 60 * 1000,
     crawlDelayMs: 600,
     maxCrawlPages: 15,
+    maxConcurrentDetails: 4,
     recentYears: 1,
     initDelayMs: 1600,
   };
@@ -105,6 +106,22 @@
 
   function isUnshippedStatus(text) {
     return text.includes("未発送") || text.includes("発送予定");
+  }
+
+  async function mapWithConcurrency(items, limit, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        results[index] = await mapper(items[index], index);
+      }
+    }
+
+    const workerCount = Math.min(limit, items.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    return results;
   }
 
   // ====================== 商品情報取得 ======================
@@ -375,10 +392,25 @@
     const closeBtn = document.getElementById("modal-close");
     closeBtn.onclick = () => modal.remove();
 
-    const promises = pendingOrders.map((order) =>
-      fetchOrderDetails(order.orderUrl),
+    const cache = OrderCache.load();
+    let cacheChanged = false;
+    const results = await mapWithConcurrency(
+      pendingOrders,
+      TIMINGS.maxConcurrentDetails,
+      async (order) => {
+        const orderHash = parseOrderHash(order.orderUrl);
+        if (orderHash && cache[orderHash]) return cache[orderHash];
+
+        const data = await fetchOrderDetails(order.orderUrl);
+        if (orderHash) {
+          cache[orderHash] = data;
+          cacheChanged = true;
+        }
+        return data;
+      },
     );
-    const results = await Promise.all(promises);
+
+    if (cacheChanged) OrderCache.save(cache);
 
     let html = "";
     results.forEach((data, i) => {
@@ -405,7 +437,7 @@
   // ====================== メイン処理 ======================
   async function enhanceMyOrdersTable() {
     const table = document.querySelector(SELECTORS.orderTable);
-    if (!table || table.querySelector('th[data-col="product"]')) return;
+    if (!table || table.dataset.spEnhanced === "1") return;
 
     const cache = OrderCache.load();
     const headerRow = table.querySelector(SELECTORS.headerRow);
@@ -415,7 +447,7 @@
     insertProductNameHeader(headerRow);
 
     const rows = Array.from(table.querySelectorAll(SELECTORS.orderRow));
-    const fetchPromises = [];
+    const missingOrders = [];
 
     for (const row of rows) {
       const orderLink = row.querySelector(SELECTORS.orderLink);
@@ -433,19 +465,25 @@
         renderProductCell(newTd, cache[orderHash]);
       } else {
         newTd.innerHTML = `<div style="color:${COLORS.muted}; font-size:14px;">取得中…</div>`;
-        fetchPromises.push(
-          fetchOrderDetails(href).then((data) => {
-            cache[orderHash] = data;
-            OrderCache.save(cache);
-            renderProductCell(newTd, data);
-          }),
-        );
+        missingOrders.push({ href, orderHash, td: newTd });
       }
     }
 
-    if (fetchPromises.length > 0) await Promise.all(fetchPromises);
+    if (missingOrders.length > 0) {
+      await mapWithConcurrency(
+        missingOrders,
+        TIMINGS.maxConcurrentDetails,
+        async ({ href, orderHash, td }) => {
+          const data = await fetchOrderDetails(href);
+          cache[orderHash] = data;
+          renderProductCell(td, data);
+        },
+      );
+      OrderCache.save(cache);
+    }
 
     appendShippingDatesToStatus(table, cache);
+    table.dataset.spEnhanced = "1";
 
     const refreshBtn = document.getElementById("sp-refresh-all");
     if (refreshBtn) {
@@ -453,7 +491,7 @@
         e.stopPropagation();
         if (!confirm("すべての注文の商品情報を再取得しますか？")) return;
         OrderCache.clear();
-        enhanceMyOrdersTable();
+        window.location.reload();
       };
     }
 
